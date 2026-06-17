@@ -2,59 +2,66 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 
-#define PORT 8080
-#define BUFFER_SIZE 1024
-#define SERVER_IP "127.0.0.1"  // localhost
+#define SERVER_IP  "127.0.0.1"
+#define PORT       8080
+#define BUFSIZE    1024
 
 int main() {
-    int sock = 0;
+    int sockfd;
+    char send_buf[BUFSIZE], recv_buf[BUFSIZE];
     struct sockaddr_in server_addr;
-    char buffer[BUFFER_SIZE];
-    const char *message = "Hello from client!";
+    socklen_t server_len = sizeof(server_addr);
 
-    // Create socket
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Socket creation failed");
+    // 1. Create UDP socket (no connection established)
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("socket creation failed");
         exit(EXIT_FAILURE);
     }
 
-    // Configure server address
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
+    // 2. Configure server address to send to
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family      = AF_INET;
+    server_addr.sin_port        = htons(PORT);
 
-    // Convert IPv4 address from text to binary form
     if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
-        perror("Invalid address/ Address not supported");
-        close(sock);
+        perror("invalid address");
+        close(sockfd);
         exit(EXIT_FAILURE);
     }
 
-    // Connect to server
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Connection failed");
-        close(sock);
-        exit(EXIT_FAILURE);
+    // 3. Send/receive loop
+    while (1) {
+        printf("Enter message (or 'quit' to exit): ");
+        if (fgets(send_buf, BUFSIZE, stdin) == NULL) break;
+
+        // Strip trailing newline
+        send_buf[strcspn(send_buf, "\n")] = '\0';
+
+        if (strcmp(send_buf, "quit") == 0) break;
+
+        // 4. Send datagram — no prior connect() needed
+        if (sendto(sockfd, send_buf, strlen(send_buf), 0,
+                   (struct sockaddr *)&server_addr, server_len) < 0) {
+            perror("sendto failed");
+            continue;
+        }
+
+        // 5. Wait for echo reply
+        memset(recv_buf, 0, BUFSIZE);
+        int n = recvfrom(sockfd, recv_buf, BUFSIZE, 0,
+                         (struct sockaddr *)&server_addr, &server_len);
+        if (n < 0) {
+            perror("recvfrom failed");
+            continue;
+        }
+
+        printf("Echo from server: \"%s\"\n", recv_buf);
     }
 
-    printf("Connected to server at %s:%d\n", SERVER_IP, PORT);
-
-    // Send message to server
-    send(sock, message, strlen(message), 0);
-    printf("Client sent: %s\n", message);
-
-    // Read response from server
-    int valread = read(sock, buffer, BUFFER_SIZE);
-    buffer[valread] = '\0';
-    printf("Server says: %s\n", buffer);
-
-    // Cleanup
-    close(sock);
-
+    close(sockfd);
+    printf("Client exiting.\n");
     return 0;
 }
